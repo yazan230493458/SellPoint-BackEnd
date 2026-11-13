@@ -79,7 +79,7 @@ export const normalizeLocale = (value: string | undefined | null): BackendLocale
   if (!value) return "en";
   const trimmed = value.trim();
   if (isBackendLocale(trimmed)) return trimmed;
-  const base = trimmed.split("-")[0];
+  const base = trimmed.split("-")[0] ?? "";
   if (base === "zh") {
     if (/tw|hk|hant/i.test(trimmed)) return "zh-TW";
     return "zh-CN";
