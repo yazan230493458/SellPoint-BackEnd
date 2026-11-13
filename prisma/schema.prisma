@@ -1,0 +1,715 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generator/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum UserRole {
+  USER
+  ADMIN
+  OWNER
+}
+
+enum ReactionType {
+  LIKE
+  DISLIKE
+}
+
+enum ContactMethod {
+  MOBILECALL
+  WHATSAPP
+  BOTH
+  EMAIL
+}
+
+enum ContactStatus {
+  NEW
+  READ
+  RESOLVED
+}
+
+enum ActivityType {
+  FAVORITE
+  AD
+  STORE
+  SECURITY
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum ReportTargetType {
+  AD
+  USER
+  MESSAGE
+  STORE
+  COMMENT
+  REVIEW
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportReason {
+  SPAM
+  SCAM
+  HARASSMENT
+  INAPPROPRIATE
+  COUNTERFEIT
+  OTHER
+  FAKE_ACCOUNT
+  IMPERSONATION
+  MISLEADING
+  INCORRECT_PRICE
+  PROHIBITED
+  DUPLICATE
+  INAPPROPRIATE_IMAGES
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  MESSAGE
+  REPORT
+  SECURITY
+  AD
+  REVIEW
+}
+
+enum VerificationChannel {
+  EMAIL
+  MOBILE
+}
+
+// =============================================================================
+// Users and Account Management
+// =============================================================================
+
+model Users {
+  id                  Int       @id @default(autoincrement())
+  username            String?   @unique
+  email               String    @unique
+  passwordHash        String?   @map("password_hash")
+  firstName           String    @map("first_name")
+  lastName            String    @map("last_name")
+  mobileNumber        String?   @unique @map("mobile_number")
+  region              String?
+  city                String?
+  is2FAEnabled        Boolean   @default(false) @map("is_2fa_enabled")
+  verifiedEmail       Boolean   @default(false) @map("verified_email")
+  verifiedMobilePhone Boolean   @default(false) @map("verified_mobile_phone")
+  bio                 String    @default("")
+  role                UserRole  @default(USER)
+  acceptTerms         Boolean   @default(false) @map("accept_terms")
+  evaluation          Float     @default(0)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  avatarUrl           String?   @map("avatar_url")
+  isActive            Boolean   @default(true) @map("is_active")
+  tokenVersion        Int       @default(0) @map("token_version")
+  totpSecret          String?   @map("totp_secret")
+  deletedAt           DateTime? @map("deleted_at")
+
+  googleId    String? @unique @map("google_id")
+  githubId    String? @unique @map("github_id")
+  appleId     String? @unique @map("apple_id")
+  microsoftId String? @unique @map("microsoft_id")
+
+  // User Content
+  ads             Ads[]
+  adReactions     AdReactions[]
+  activities      Activity[]
+  favorites       Favorites[]
+  comments        Comment[]
+  stores          Store[]
+  reviewsGiven    Review[]          @relation("ReviewAuthor")
+  reviewsReceived Review[]          @relation("ReviewTarget")
+
+  // Chats and Messages
+  chatsAsBuyer  Chat[]        @relation("ChatBuyer")
+  chatsAsSeller Chat[]        @relation("ChatSeller")
+  sentMessages  ChatMessage[] @relation("MessageSender")
+
+  // Account Settings and Subscriptions
+  admin            Admin?
+  preference       UserPreference?
+  subscriptions    UserSubscription[]
+  notifications   Notification[]
+  platformSettings PlatformSetting[]
+
+  // Reports and Audit History
+  reportsFiled    Report[]  @relation("ReportAuthor")
+  reportsResolved Report[]  @relation("ReportResolver")
+  auditLogs       AuditLog[]
+  contactMessages ContactMessage[]
+
+  // Authentication and Verification
+  refreshTokens          RefreshToken[]
+  revokedAccessTokens    RevokedAccessToken[]
+  passwordResetTokens    PasswordResetToken[]
+  verificationChallenges VerificationChallenge[]
+  loginChallenges        LoginChallenge[]
+  deviceAccounts         DeviceAccount[]
+
+  @@index([role, isActive])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  role      String   @default("admin")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admins")
+}
+
+model UserPreference {
+  id                     Int      @id @default(autoincrement())
+  userId                 Int      @unique @map("user_id")
+  theme                  String   @default("system")
+  language               String   @default("en")
+  emailSummary           Boolean  @default(false) @map("email_summary")
+  desktopNotifications   Boolean  @default(false) @map("desktop_notifications")
+  mobileVisibility       String   @default("Everyone") @map("mobile_visibility")
+  emailVisibility        String   @default("Just Me") @map("email_visibility")
+  cityVisibility         String   @default("Everyone") @map("city_visibility")
+  allowDirectMessages    Boolean  @default(true) @map("allow_direct_messages")
+  bannedUsernames        String[] @default([]) @map("banned_usernames")
+  messagesChannel        Int      @default(2) @map("messages_channel")
+  offersChannel          Int      @default(2) @map("offers_channel")
+  adStatusChannel        Int      @default(1) @map("ad_status_channel")
+  securityChannel        Int      @default(1) @map("security_channel")
+  reviewsChannel         Int      @default(2) @map("reviews_channel")
+  priceDropsChannel      Int      @default(2) @map("price_drops_channel")
+  recommendationsChannel Int      @default(1) @map("recommendations_channel")
+  reportsChannel         Int      @default(1) @map("reports_channel")
+  subscriptionChannel    Int      @default(1) @map("subscription_channel")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  user                   Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// =============================================================================
+// Authentication, Sessions, and Verification
+// =============================================================================
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      Users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("refresh_tokens")
+}
+
+model AuthDevice {
+  id        Int             @id @default(autoincrement())
+  tokenHash String          @unique @map("token_hash")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  accounts  DeviceAccount[]
+
+  @@map("auth_devices")
+}
+
+model DeviceAccount {
+  id          Int        @id @default(autoincrement())
+  deviceId    Int        @map("device_id")
+  userId      Int        @map("user_id")
+  refreshHash String     @map("refresh_hash")
+  lastUsedAt  DateTime   @default(now()) @map("last_used_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  device      AuthDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user        Users      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, userId])
+  @@index([userId])
+  @@map("device_accounts")
+}
+
+model RevokedAccessToken {
+  jti       String   @id
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("revoked_access_tokens")
+}
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      Users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model LoginChallenge {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       Users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("login_challenges")
+}
+
+model VerificationChallenge {
+  id         Int                 @id @default(autoincrement())
+  userId     Int                 @map("user_id")
+  channel    VerificationChannel
+  codeHash   String              @map("code_hash")
+  expiresAt  DateTime            @map("expires_at")
+  consumedAt DateTime?           @map("consumed_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  user       Users               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, channel])
+  @@map("verification_challenges")
+}
+
+// =============================================================================
+// Categories, Stores, and Advertisements
+// =============================================================================
+
+model Category {
+  id          Int        @id @default(autoincrement())
+  name        String     @unique @db.VarChar(100)
+  slug        String     @unique @db.VarChar(120)
+  description String?    @db.VarChar(500)
+  imageUrl    String?
+  isActive    Boolean    @default(true)
+  sortOrder   Int        @default(0)
+  parentId    Int?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children    Category[] @relation("CategoryHierarchy")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([parentId])
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+model Store {
+  id                     Int            @id @default(autoincrement())
+  userId                 Int            @map("user_id")
+  username               String
+  storeName              String         @map("store_name")
+  mobileNumber           String         @map("mobile_number")
+  selectedCountry        String         @map("selected_country")
+  selectedCity           String         @map("selected_city")
+  description            String
+  categories             String[]       @default([])
+  websiteUrl             String?        @map("website_url")
+  supportEmail           String?        @map("support_email")
+  image                  String?
+  mainImageIndex         Int?           @map("main_image_index")
+  preferredContactMethod ContactMethod? @map("preferred_contact_method")
+  paymentMethods         String[]       @default([]) @map("payment_methods")
+  acceptTerms            Boolean        @default(false) @map("accept_terms")
+  sections               Json           @default("[]")
+  isActive               Boolean        @default(true) @map("is_active")
+  isDeleted              Boolean        @default(false) @map("is_deleted")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  user                   Users          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ads                    Ads[]
+
+  @@index([userId, isDeleted])
+  @@index([isActive, isDeleted])
+  @@index([storeName])
+  @@map("stores")
+}
+
+model Ads {
+  id                     Int           @id @default(autoincrement())
+  userId                 Int           @map("user_id")
+  storeId                Int?          @map("store_id")
+  username               String
+  adName                 String        @map("ad_name")
+  mobileNumber           String        @map("mobile_number")
+  selectedCountry        String        @map("selected_country")
+  selectedRegion         String        @default("") @map("selected_region")
+  selectedCity           String        @map("selected_city")
+  description            String
+  category               String
+  price                  Decimal       @db.Decimal(12, 2)
+  showPrice              Boolean       @default(true) @map("show_price")
+  images                 String[]      @default([])
+  mainImageIndex         Int           @default(0) @map("main_image_index")
+  preferredContactMethod ContactMethod @map("preferred_contact_method")
+  acceptTerms            Boolean       @default(false) @map("accept_terms")
+  likes                  Int           @default(0)
+  dislikes               Int           @default(0)
+  views                  Int           @default(0)
+  isActive               Boolean       @default(true) @map("is_active")
+  isDeleted              Boolean       @default(false) @map("is_deleted")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  users       Users          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store       Store?         @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  reactions   AdReactions[]
+  favorites   Favorites[]
+  chats       Chat[]
+  comments    Comment[]
+  impressions AdImpression[]
+  reviews     Review[]
+
+  @@index([userId])
+  @@index([storeId])
+  @@index([category, isActive, isDeleted])
+  @@index([selectedCountry, selectedCity, isActive, isDeleted])
+  @@index([price])
+  @@index([createdAt])
+  @@index([isActive])
+  @@map("ads")
+}
+
+model AdImpression {
+  id        Int      @id @default(autoincrement())
+  adId      Int      @map("ad_id")
+  viewerKey String   @map("viewer_key")
+  createdAt DateTime @default(now()) @map("created_at")
+  ad        Ads      @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([adId, viewerKey])
+  @@index([createdAt])
+  @@map("ad_impressions")
+}
+
+model AdReactions {
+  id        Int          @id @default(autoincrement())
+  userId    Int          @map("user_id")
+  adId      Int          @map("ad_id")
+  reaction  ReactionType
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  users     Users        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ads       Ads          @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, adId])
+  @@index([adId, reaction])
+  @@map("ad_reactions")
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  adId      Int
+  text      String
+  isHidden  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ad        Ads      @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([adId, createdAt])
+  @@map("comments")
+}
+
+model Favorites {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  adId      Int      @map("ad_id")
+  title     String
+  category  String
+  price     Decimal  @db.Decimal(12, 2)
+  location  String
+  imageUrl  String   @map("image_url")
+  href      String
+  createdAt DateTime @default(now()) @map("created_at")
+  users     Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ad        Ads      @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, adId])
+  @@index([userId, createdAt])
+  @@map("favorites")
+}
+
+// =============================================================================
+// Messaging and Reviews
+// =============================================================================
+
+model Chat {
+  id            Int           @id @default(autoincrement())
+  buyerId       Int           @map("buyer_id")
+  sellerId      Int           @map("seller_id")
+  adId          Int?          @map("ad_id")
+  lastMessage   String?
+  lastMessageAt DateTime      @default(now())
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  buyer         Users         @relation("ChatBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller        Users         @relation("ChatSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  ad            Ads?          @relation(fields: [adId], references: [id], onDelete: SetNull)
+  messages      ChatMessage[]
+
+  @@index([buyerId, lastMessageAt])
+  @@index([sellerId, lastMessageAt])
+  @@index([adId])
+  @@map("chat")
+}
+
+model ChatMessage {
+  id        Int       @id @default(autoincrement())
+  chatId    Int       @map("chat_id")
+  senderId  Int       @map("sender_id")
+  text      String
+  imageUrl  String?   @map("image_url")
+  isRead    Boolean   @default(false) @map("is_read")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  chat      Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    Users     @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([senderId])
+  @@map("chat_messages")
+}
+
+model Review {
+  id             Int      @id @default(autoincrement())
+  reviewerId     Int      @map("reviewer_id")
+  reviewedUserId Int      @map("reviewed_user_id")
+  adId           Int?     @map("ad_id")
+  rating         Int
+  text           String   @default("")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  reviewer       Users    @relation("ReviewAuthor", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewedUser   Users    @relation("ReviewTarget", fields: [reviewedUserId], references: [id], onDelete: Cascade)
+  ad             Ads?     @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewerId, reviewedUserId, adId])
+  @@index([reviewedUserId, createdAt])
+  @@index([reviewerId])
+  @@index([adId])
+  @@map("reviews")
+}
+
+// =============================================================================
+// Subscriptions and Payments
+// =============================================================================
+
+model SubscriptionPlan {
+  id                Int      @id @default(autoincrement())
+  name              String   @unique
+  description       String?
+  price             Decimal  @db.Decimal(12, 2)
+  currency          String   @default("SAR")
+  durationDays      Int      @map("duration_days")
+  isActive          Boolean  @default(true) @map("is_active")
+  features          String[] @default([])
+  adLimit           Int      @default(50) @map("ad_limit")
+  featuredPlacement Boolean  @default(false) @map("featured_placement")
+  visibilityBoost   Int      @default(0) @map("visibility_boost")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  subscriptions UserSubscription[]
+
+  @@map("subscription_plan")
+}
+
+model UserSubscription {
+  id          Int                @id @default(autoincrement())
+  userId      Int                @map("user_id")
+  planId      Int                @map("plan_id")
+  status      SubscriptionStatus @default(PENDING)
+  startsAt    DateTime?          @map("starts_at")
+  endsAt      DateTime?          @map("ends_at")
+  autoRenew   Boolean            @default(false) @map("auto_renew")
+  cancelledAt DateTime?          @map("cancelled_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  user        Users              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan        SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments    Payment[]
+
+  @@index([userId, status])
+  @@index([endsAt])
+  @@map("user_subscriptions")
+}
+
+model Payment {
+  id                Int              @id @default(autoincrement())
+  subscriptionId    Int              @map("subscription_id")
+  amount            Decimal          @db.Decimal(12, 2)
+  currency          String           @default("SAR")
+  status            PaymentStatus    @default(PENDING)
+  provider          String?
+  providerReference String?          @unique @map("provider_reference")
+  providerIntentId  String?          @unique @map("provider_intent_id")
+  paymentMethod     String?          @map("payment_method")
+  metadata          Json?
+  paidAt            DateTime?        @map("paid_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  subscription      UserSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  webhookEvents     PaymentWebhookEvent[]
+
+  @@index([subscriptionId, status])
+  @@map("payments")
+}
+
+model PaymentWebhookEvent {
+  id        String   @id
+  provider  String
+  eventType String   @map("event_type")
+  paymentId Int?     @map("payment_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([provider, createdAt])
+  @@map("payment_webhook_events")
+}
+
+// =============================================================================
+// Notifications, Activity, Reports, and Platform Administration
+// =============================================================================
+
+model Activity {
+  id          Int          @id @default(autoincrement())
+  userId      Int          @map("user_id")
+  type        ActivityType
+  actionTitle String       @map("action_title")
+  description String
+  timestamp   DateTime     @default(now())
+  category    String
+  imageUrl    String?      @map("image_url")
+  href        String?
+  users       Users        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, timestamp])
+  @@map("activities")
+}
+
+model Notification {
+  id          Int              @id @default(autoincrement())
+  userId      Int              @map("user_id")
+  title       String
+  message     String
+  type        NotificationType @default(INFO)
+  isRead      Boolean          @default(false) @map("is_read")
+  href        String?
+  dedupeKey   String?          @map("dedupe_key")
+  dismissedAt DateTime?        @map("dismissed_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  user        Users            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model Report {
+  id           Int              @id @default(autoincrement())
+  reporterId   Int              @map("reporter_id")
+  targetType   ReportTargetType @map("target_type")
+  targetId     Int              @map("target_id")
+  reason       ReportReason
+  description  String?          @db.VarChar(1000)
+  status       ReportStatus     @default(PENDING)
+  adminNote    String?          @map("admin_note") @db.VarChar(1000)
+  resolvedById Int?             @map("resolved_by_id")
+  resolvedAt   DateTime?        @map("resolved_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  reporter     Users            @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  resolvedBy   Users?           @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([reporterId, createdAt])
+  @@map("reports")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    Int      @map("actor_id")
+  action     String
+  targetType String   @map("target_type")
+  targetId   String?  @map("target_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  actor      Users    @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById Int?     @map("updated_by_id")
+  updatedBy   Users?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_settings")
+}
+
+model ContactMessage {
+  id        Int           @id @default(autoincrement())
+  userId    Int?          @map("user_id")
+  name      String        @db.VarChar(80)
+  email     String        @db.VarChar(254)
+  subject   String        @db.VarChar(120)
+  message   String        @db.VarChar(2000)
+  status    ContactStatus @default(NEW)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  user      Users?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+  @@map("contact_messages")
+}

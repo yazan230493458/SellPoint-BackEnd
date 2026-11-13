@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "users" ALTER COLUMN "username" DROP NOT NULL,
+ALTER COLUMN "password_hash" DROP NOT NULL,
+ALTER COLUMN "mobile_number" DROP NOT NULL,
+ALTER COLUMN "region" DROP NOT NULL,
+ALTER COLUMN "city" DROP NOT NULL;
