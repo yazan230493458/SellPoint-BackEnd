@@ -21,6 +21,7 @@ import { isOpenChallenge, isUsableRecoveryToken, nextFailedAttempt } from "../..
 import { decryptSecret, verifyTotp } from "../../lib/totp.js";
 import { getActiveSubscription } from "../../lib/premium.js";
 import { passwordResetDeliveryConfigured, sendPasswordResetEmail } from "../../lib/mail.js";
+import { oauthHandoffHash } from "../../lib/oauth-login.js";
 import authMiddleware from "../middleware/auth.middleware.js";
 import { validate } from "../middleware/validate.middleware.js";
 import { authRateLimit, recoveryRateLimit } from "../middleware/rate-limit.middleware.js";
@@ -226,6 +227,51 @@ router.post("/refresh", authRateLimit, validate({ body: refreshSchema }), asyncH
   await rememberSwitcherAccount(req, res, stored.user.id, session.refreshToken);
   res.status(200).json({ message: "Session renewed", user: safeUser });
 }));
+
+const oauthHandoffSchema = z.object({
+  code: z.string().trim().min(20).max(200),
+});
+
+router.post(
+  "/auth/oauth/complete",
+  authRateLimit,
+  validate({ body: oauthHandoffSchema }),
+  asyncHandler(async (req, res) => {
+    const body = req.input?.body as z.infer<typeof oauthHandoffSchema>;
+    const handoff = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash: oauthHandoffHash(body.code) },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            role: true,
+            tokenVersion: true,
+            isActive: true,
+            deletedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!isUsableRecoveryToken(handoff) || !handoff.user || handoff.user.deletedAt) {
+      throw new HttpError(400, "Invalid or expired verification challenge");
+    }
+    if (!handoff.user.isActive) {
+      throw new HttpError(403, "Account is disabled");
+    }
+
+    await prisma.passwordResetToken.update({
+      where: { id: handoff.id },
+      data: { usedAt: new Date() },
+    });
+
+    await establishBrowserSession(req, res, sessionIdentity(handoff.user));
+    const safeUser = await sessionUser(handoff.user.id);
+    res.status(200).json({ message: "Login successful", user: safeUser });
+  }),
+);
 
 const twoFactorLoginSchema = z.object({
   challengeToken: z.string().min(20).max(200),
