@@ -67,7 +67,12 @@ export const errorMiddleware: ErrorRequestHandler = (error, req, res, _next) => 
     return;
   }
 
-  console.error(error instanceof Error ? error.message : "Unknown error");
+  // Never expose stack traces, Prisma meta, or filesystem paths to clients.
+  if (process.env.NODE_ENV === "development") {
+    console.error(error);
+  } else {
+    console.error(error instanceof Error ? error.message : "Unknown error");
+  }
   res.status(500).json({
     message: translateMessage("Internal server error", locale),
   });

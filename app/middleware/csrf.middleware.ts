@@ -1,8 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
 import { accessCookieName, readCookie, refreshCookieName } from "../../lib/cookies.js";
+import { isTrustedOrigin, parseTrustedOrigins } from "../../lib/cors.js";
 import { sendLocalized } from "../../lib/i18n/respond.js";
 
 const unsafe = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const trustedOrigins = parseTrustedOrigins(process.env.CORS_ORIGIN);
 
 const csrfMiddleware = (req: Request, res: Response, next: NextFunction) => {
   if (!unsafe.has(req.method)) {
@@ -16,7 +19,7 @@ const csrfMiddleware = (req: Request, res: Response, next: NextFunction) => {
     return;
   }
   const origin = req.get("origin");
-  if (!origin || origin !== process.env.CORS_ORIGIN) {
+  if (!isTrustedOrigin(origin, trustedOrigins)) {
     sendLocalized(req, res, 403, "Cross-site request blocked");
     return;
   }

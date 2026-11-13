@@ -4,7 +4,15 @@ export const accessCookieName = "sp_access";
 export const refreshCookieName = "sp_refresh";
 export const deviceCookieName = "sp_device";
 
-const secureCookie = () => process.env.COOKIE_SECURE === "1";
+/**
+ * Secure cookies in production by default.
+ * Set COOKIE_SECURE=0 only for local HTTP debugging.
+ */
+export const secureCookie = () => {
+  if (process.env.COOKIE_SECURE === "0") return false;
+  if (process.env.COOKIE_SECURE === "1") return true;
+  return process.env.NODE_ENV === "production";
+};
 
 const serialize = (name: string, value: string, maxAge: number) => {
   const parts = [

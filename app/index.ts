@@ -28,6 +28,8 @@ import { notFoundMiddleware } from "./middleware/not-found.middleware.js";
 import googleRoutes from "./auth/google.routes.js";
 import githubRoutes from "./auth/github.routes.js";
 import { uploadsRoot } from "../lib/uploads.js";
+import { parseTrustedOrigins } from "../lib/cors.js";
+import { additionalSecurityHeaders, hstsEnabled } from "../lib/security-headers.js";
 
 const app: Express = express();
 const PORT: number = Number(process.env.PORT) || 1000;
@@ -41,7 +43,14 @@ if (!CORS_ORIGIN || !RATE_LIMIT_WINDOW || !RATE_LIMIT_LIMIT || !RATE_LIMIT_MESSA
   throw new Error("Missing environment variables");
 }
 
-if (process.env.TRUST_PROXY === "1") {
+const trustedOrigins = parseTrustedOrigins(CORS_ORIGIN);
+if (trustedOrigins.length === 0) {
+  throw new Error("CORS_ORIGIN must list at least one trusted frontend origin");
+}
+
+app.disable("x-powered-by");
+
+if (process.env.TRUST_PROXY === "1" || (NODE_ENV === "production" && process.env.TRUST_PROXY !== "0")) {
   app.set("trust proxy", 1);
 }
 
@@ -53,11 +62,39 @@ const limiter = rateLimit({
   message: { message: RATE_LIMIT_MESSAGE },
 });
 
-app.use(morgan(NODE_ENV === "development" ? "development" : NODE_ENV));
+app.use(morgan(NODE_ENV === "development" ? "development" : "combined"));
 app.use(limiter);
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-}));
+app.use(
+  helmet({
+    // API + uploaded assets; clicks/embeds blocked via frame-ancestors + X-Frame-Options.
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        imgSrc: ["'self'", "data:"],
+        styleSrc: ["'none'"],
+        scriptSrc: ["'none'"],
+        upgradeInsecureRequests: NODE_ENV === "production" ? [] : null,
+      },
+    },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    frameguard: { action: "deny" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    strictTransportSecurity: hstsEnabled()
+      ? {
+          maxAge: 15_552_000,
+          includeSubDomains: false,
+          preload: false,
+        }
+      : false,
+  }),
+);
+app.use(additionalSecurityHeaders);
 app.use(compression());
 app.use(express.json({
   limit: "1mb",
@@ -66,9 +103,15 @@ app.use(express.json({
   },
 }));
 app.use(cors({
-  origin: CORS_ORIGIN,
+  origin: (origin, callback) => {
+    if (!origin || trustedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -83,6 +126,11 @@ app.use("/uploads", express.static(uploadsRoot, {
   index: false,
   dotfiles: "deny",
   redirect: false,
+  setHeaders: (res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  },
 }));
 
 app.use("/api", authRoutes);
